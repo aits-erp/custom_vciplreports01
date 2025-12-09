@@ -20,7 +20,6 @@ def get_data(filters):
 
     invoices = frappe.db.sql("""
         SELECT 
-            si.name AS invoice,
             si.customer,
             si.customer_name,
             si.customer_group,
@@ -35,22 +34,57 @@ def get_data(filters):
 
     for inv in invoices:
 
-        # Fetch Sales Person assigned to Customer (TSO)
-        tso = frappe.db.get_value(
+        # 1️⃣ Get Sales Person from Customer's Sales Team
+        sales_person = frappe.db.get_value(
             "Sales Team",
             {"parent": inv.customer, "parenttype": "Customer"},
             "sales_person"
         )
 
-        asm = rsm = None
+        asm = "-"
+        rsm = "-"
 
-        if tso:
-            # Parent of TSO = ASM
-            asm = frappe.db.get_value("Sales Person", tso, "parent_sales_person")
+        if sales_person:
 
-            # Parent of ASM = RSM
-            if asm:
-                rsm = frappe.db.get_value("Sales Person", asm, "parent_sales_person")
+            # Get group of the Sales Person
+            parent_group = frappe.db.get_value(
+                "Sales Person", sales_person, "parent_sales_person"
+            )
+
+            # CASE 1 — Sales Person under ASM group
+            if parent_group and parent_group.startswith("ASM"):
+
+                # ASM = first non-group Sales Person under ASM group
+                asm = frappe.db.get_value(
+                    "Sales Person",
+                    {"parent_sales_person": parent_group, "is_group": 0},
+                    "name"
+                )
+
+                # Parent of ASM = RSM group
+                rsm_group = frappe.db.get_value(
+                    "Sales Person", parent_group, "parent_sales_person"
+                )
+
+                # RSM = first non-group Sales Person under RSM group
+                rsm = frappe.db.get_value(
+                    "Sales Person",
+                    {"parent_sales_person": rsm_group, "is_group": 0},
+                    "name"
+                )
+
+            # CASE 2 — Sales Person directly under RSM group
+            elif parent_group and parent_group.startswith("RSM"):
+
+                # RSM = first non-group Sales Person under that RSM group
+                rsm = frappe.db.get_value(
+                    "Sales Person",
+                    {"parent_sales_person": parent_group, "is_group": 0},
+                    "name"
+                )
+
+                asm = "-"
+
 
         # Overdue calculation
         overdue_days = 0
