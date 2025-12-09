@@ -9,8 +9,11 @@ def get_columns():
     return [
         {"label": "Customer Group", "fieldname": "customer_group", "fieldtype": "Data", "width": 120},
         {"label": "Distributor Name", "fieldname": "customer_name", "fieldtype": "Data", "width": 180},
-        {"label": "ASM", "fieldname": "asm", "fieldtype": "Data", "width": 150},
-        {"label": "RSM", "fieldname": "rsm", "fieldtype": "Data", "width": 150},
+
+        # CLICKABLE ASM & RSM
+        {"label": "ASM", "fieldname": "asm", "fieldtype": "Link", "options": "Sales Person", "width": 150},
+        {"label": "RSM", "fieldname": "rsm", "fieldtype": "Link", "options": "Sales Person", "width": 150},
+
         {"label": "Total Outstanding Amount", "fieldname": "total_outstanding", "fieldtype": "Currency", "width": 180},
         {"label": "Total Overdue Amount", "fieldname": "total_overdue", "fieldtype": "Currency", "width": 180},
     ]
@@ -18,7 +21,6 @@ def get_columns():
 
 def get_data(filters):
 
-    # Fetch all invoices for Distributor customers
     invoices = frappe.db.sql("""
         SELECT 
             si.name AS invoice,
@@ -31,7 +33,6 @@ def get_data(filters):
           AND si.customer_group = 'Distributor'
     """, as_dict=True)
 
-    # Group values by Customer
     customer_map = {}
 
     for inv in invoices:
@@ -42,75 +43,67 @@ def get_data(filters):
                 "customer_name": inv.customer_name,
                 "total_outstanding": 0,
                 "total_overdue": 0,
-                "asm": "-",
-                "rsm": "-"
+                "asm": None,
+                "rsm": None
             }
 
-        # ------ 1️⃣ TOTAL OUTSTANDING (simple sum of outstanding) ------
+        # Total Outstanding
         customer_map[inv.customer]["total_outstanding"] += inv.outstanding_amount
 
-        # ------ 2️⃣ TOTAL OVERDUE BASED ON PAYMENT TERMS ------
+        # Payment Terms Overdue Logic
         payment_terms = frappe.db.sql("""
             SELECT payment_amount, due_date 
             FROM `tabPayment Schedule`
             WHERE parent = %s
         """, (inv.invoice,), as_dict=True)
 
-        overdue_amount = 0
-
+        overdue = 0
         for term in payment_terms:
             if term.due_date and getdate(today()) > getdate(term.due_date):
-                overdue_amount += term.payment_amount
+                overdue += term.payment_amount
 
-        customer_map[inv.customer]["total_overdue"] += overdue_amount
+        customer_map[inv.customer]["total_overdue"] += overdue
 
-    # ------ 3️⃣ GET ASM & RSM BASED ON CUSTOMER'S SALES PERSON ------
-    for cust in customer_map:
 
-        # Sales Person from Customer → Sales Team table
+    # ---- FIND ASM & RSM BY CLIMBING THE TREE ----
+    for cust, row in customer_map.items():
+
         sales_person = frappe.db.get_value(
             "Sales Team",
             {"parent": cust, "parenttype": "Customer"},
             "sales_person"
         )
 
-        asm = "-"
-        rsm = "-"
+        asm = None
+        rsm = None
 
-        if sales_person:
+        current = sales_person
 
-            parent_group = frappe.db.get_value("Sales Person", sales_person, "parent_sales_person")
+        while current:
+            parent = frappe.db.get_value("Sales Person", current, "parent_sales_person")
 
-            # CASE 1 → Sales Person under ASM group
-            if parent_group and parent_group.startswith("ASM"):
+            if not parent:
+                break
 
+            # Identify ASM
+            if parent.startswith("ASM"):
                 asm = frappe.db.get_value(
                     "Sales Person",
-                    {"parent_sales_person": parent_group, "is_group": 0},
+                    {"parent_sales_person": parent, "is_group": 0},
                     "name"
                 )
 
-                rsm_group = frappe.db.get_value("Sales Person", parent_group, "parent_sales_person")
-
+            # Identify RSM
+            if parent.startswith("RSM"):
                 rsm = frappe.db.get_value(
                     "Sales Person",
-                    {"parent_sales_person": rsm_group, "is_group": 0},
+                    {"parent_sales_person": parent, "is_group": 0},
                     "name"
                 )
 
-            # CASE 2 → Sales Person directly under RSM group
-            elif parent_group and parent_group.startswith("RSM"):
+            current = parent
 
-                rsm = frappe.db.get_value(
-                    "Sales Person",
-                    {"parent_sales_person": parent_group, "is_group": 0},
-                    "name"
-                )
+        row["asm"] = asm
+        row["rsm"] = rsm
 
-                asm = "-"
-
-        customer_map[cust]["asm"] = asm
-        customer_map[cust]["rsm"] = rsm
-
-    # Return as list
     return list(customer_map.values())
