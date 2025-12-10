@@ -6,34 +6,62 @@ def execute(filters=None):
     filters = filters or {}
     year = cint(filters.get("year")) if filters.get("year") else None
     company = filters.get("company")
+    monthly_target = flt(filters.get("monthly_target")) if filters.get("monthly_target") else 0
 
     rows = get_data(year=year, company=company)
-    # compute growth % and cumulative
+    last_year_map = get_last_year_map(year, company)
+
     processed = []
     prev = None
     cumulative = 0.0
+
     for r in rows:
         total = r.get("total") or 0.0
+        qty = r.get("qty") or 0
+        invoice_count = r.get("invoice_count") or 0
         cumulative += total
+
+        # MoM Growth
         growth = None
         if prev is not None and prev > 0:
             growth = round(((total - prev) / prev) * 100, 2)
+
+        # YoY Growth
+        last_year_total = last_year_map.get(r["mn"], 0)
+        yoy_growth = None
+        if last_year_total and last_year_total > 0:
+            yoy_growth = round(((total - last_year_total) / last_year_total) * 100, 2)
+
+        # Target Achievement %
+        target_achievement = None
+        if monthly_target > 0:
+            target_achievement = round((total / monthly_target) * 100, 2)
+
         processed.append({
-            "month": r.get("month"),
-            "year": r.get("yr"),
-            "month_no": r.get("mn"),
+            "month": r["month"],
+            "year": r["yr"],
+            "month_no": r["mn"],
             "total": total,
+            "qty": qty,
+            "invoice_count": invoice_count,
             "growth": growth,
-            "cumulative": cumulative
+            "yoy_growth": yoy_growth,
+            "cumulative": cumulative,
+            "target_achievement": target_achievement,
         })
+
         prev = total
 
-    chart = get_chart_data(processed)
+    chart = get_chart_data(processed, last_year_map)
     columns = get_columns()
     summary = get_summary(processed)
 
     return columns, processed, summary, chart
 
+
+# ------------------------------------------------------
+# UTILITIES
+# ------------------------------------------------------
 
 def cint(v, default=0):
     try:
@@ -41,22 +69,42 @@ def cint(v, default=0):
     except:
         return default
 
+def flt(v, default=0.0):
+    try:
+        return float(v)
+    except:
+        return default
+
+
+# ------------------------------------------------------
+# COLUMNS
+# ------------------------------------------------------
 
 def get_columns():
     return [
         {"label": "Month", "fieldname": "month", "fieldtype": "Data", "width": 150},
-        {"label": "Total Purchase", "fieldname": "total", "fieldtype": "Currency", "width": 150},
+        {"label": "Total Purchase", "fieldname": "total", "fieldtype": "Currency", "width": 160},
+        {"label": "Qty Purchased", "fieldname": "qty", "fieldtype": "Float", "width": 120},
+        {"label": "Invoices", "fieldname": "invoice_count", "fieldtype": "Int", "width": 100},
         {"label": "MoM Growth %", "fieldname": "growth", "fieldtype": "Percent", "width": 120},
+        {"label": "YoY Growth %", "fieldname": "yoy_growth", "fieldtype": "Percent", "width": 130},
         {"label": "Cumulative", "fieldname": "cumulative", "fieldtype": "Currency", "width": 150},
+        {"label": "% Target Achieved", "fieldname": "target_achievement", "fieldtype": "Percent", "width": 150},
     ]
 
+
+# ------------------------------------------------------
+# MAIN DATA FETCH
+# ------------------------------------------------------
 
 def get_data(year=None, company=None):
     conditions = ["pi.docstatus = 1"]
     params = []
+
     if year:
         conditions.append("YEAR(pi.posting_date) = %s")
         params.append(year)
+
     if company:
         conditions.append("pi.company = %s")
         params.append(company)
@@ -68,8 +116,11 @@ def get_data(year=None, company=None):
             DATE_FORMAT(pi.posting_date, '%%b-%%Y') AS month,
             YEAR(pi.posting_date) AS yr,
             MONTH(pi.posting_date) AS mn,
-            SUM(pi.base_grand_total) AS total
+            SUM(pi.base_grand_total) AS total,
+            SUM(pii.qty) AS qty,
+            COUNT(DISTINCT pi.name) AS invoice_count
         FROM `tabPurchase Invoice` pi
+        LEFT JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name
         WHERE {where}
         GROUP BY YEAR(pi.posting_date), MONTH(pi.posting_date)
         ORDER BY YEAR(pi.posting_date), MONTH(pi.posting_date)
@@ -78,40 +129,72 @@ def get_data(year=None, company=None):
     return frappe.db.sql(sql, tuple(params), as_dict=True)
 
 
-def get_chart_data(rows):
+# ------------------------------------------------------
+# YOY FETCH
+# ------------------------------------------------------
+
+def get_last_year_map(current_year, company):
+    if not current_year:
+        return {}
+
+    sql = """
+        SELECT MONTH(posting_date) AS mn, SUM(base_grand_total) AS total
+        FROM `tabPurchase Invoice`
+        WHERE docstatus = 1
+          AND YEAR(posting_date) = %s
+          AND company = %s
+        GROUP BY MONTH(posting_date)
+    """
+
+    rows = frappe.db.sql(sql, (current_year - 1, company), as_dict=True)
+    return {r["mn"]: r["total"] for r in rows}
+
+
+# ------------------------------------------------------
+# CHART
+# ------------------------------------------------------
+
+def get_chart_data(rows, yoy_map):
     labels = [r["month"] for r in rows]
     values = [r["total"] for r in rows]
     cumulative = [r["cumulative"] for r in rows]
+    yoy_values = [yoy_map.get(r["month_no"], 0) for r in rows]
 
     return {
         "data": {
             "labels": labels,
             "datasets": [
-                {"name": "Purchase Amount", "values": values},
-                {"name": "Cumulative", "values": cumulative}
+                {"name": "Purchase Amount", "type": "bar", "values": values},
+                {"name": "Cumulative", "type": "line", "values": cumulative},
+                {"name": "Last Year Same Month", "type": "line", "values": yoy_values}
             ]
         },
-        "type": "bar",   # front-end can toggle if needed
-        "height": 350
+        "type": "bar",
+        "height": 380
     }
 
 
+# ------------------------------------------------------
+# SUMMARY
+# ------------------------------------------------------
+
 def get_summary(rows):
-    total = sum([r["total"] for r in rows]) if rows else 0.0
+    total = sum(r["total"] for r in rows) if rows else 0.0
     avg = round(total / len(rows), 2) if rows else 0.0
+
     best = None
     if rows:
         best_row = max(rows, key=lambda x: x["total"])
         best = f"{best_row['month']} ({best_row['total']})"
 
-    # last month's growth (most recent row's growth)
-    last_growth = rows[-1]["growth"] if rows and rows[-1].get("growth") is not None else None
-    growth_label = f"{last_growth} %" if last_growth is not None else "N/A"
+    last_growth = rows[-1].get("growth")
+    last_yoy = rows[-1].get("yoy_growth")
 
     summary = [
         {"label": "Total Purchase", "value": total, "indicator": "green"},
-        {"label": "Average / Month", "value": avg},
+        {"label": "Average Monthly Purchase", "value": avg},
         {"label": "Best Month", "value": best or "N/A"},
-        {"label": "Latest MoM Growth", "value": growth_label, "indicator": "neutral"}
+        {"label": "Latest MoM Growth", "value": f"{last_growth} %" if last_growth is not None else "N/A"},
+        {"label": "Latest YoY Growth", "value": f"{last_yoy} %" if last_yoy is not None else "N/A"},
     ]
     return summary

@@ -67,7 +67,7 @@ def get_columns():
 # -------------------- MAIN DATA LOGIC -------------------- #
 def get_data(filters=None):
 
-    # 1️⃣ Fetch Invoices
+    # Fetch invoices
     invoices = frappe.db.sql("""
         SELECT 
             si.name AS invoice,
@@ -85,7 +85,7 @@ def get_data(filters=None):
     if not invoices:
         return []
 
-    # 2️⃣ Fetch Payment Schedules (all at once, faster)
+    # Fetch payment terms
     payment_terms = frappe.db.sql("""
         SELECT parent, payment_amount, due_date
         FROM `tabPayment Schedule`
@@ -95,7 +95,7 @@ def get_data(filters=None):
     for p in payment_terms:
         pay_map.setdefault(p.parent, []).append(p)
 
-    # 3️⃣ Group by Customer
+    # Group data by customer
     cust_map = {}
 
     for inv in invoices:
@@ -110,10 +110,10 @@ def get_data(filters=None):
                 "invoices_detail": []
             }
 
-        # Add outstanding
+        # outstanding
         cust_map[cust]["total_outstanding"] += inv.outstanding_amount
 
-        # Calculate overdue
+        # overdue calculation
         overdue_amount = 0
         for t in pay_map.get(inv.invoice, []):
             if t.due_date and getdate(today()) > getdate(t.due_date):
@@ -121,7 +121,7 @@ def get_data(filters=None):
 
         cust_map[cust]["total_overdue"] += overdue_amount
 
-        # Save invoice details for popup
+        # store invoice info
         cust_map[cust]["invoices_detail"].append({
             "invoice": inv.invoice,
             "posting_date": str(inv.posting_date),
@@ -129,7 +129,7 @@ def get_data(filters=None):
             "overdue": float(overdue_amount)
         })
 
-    # 4️⃣ Load Sales Team to identify ASM / RSM
+    # Load Sales Team relation
     sales_team = frappe.db.get_all(
         "Sales Team",
         filters={"parenttype": "Customer"},
@@ -138,28 +138,42 @@ def get_data(filters=None):
 
     sales_map = {s.parent: s.sales_person for s in sales_team}
 
-    # 5️⃣ Find ASM / RSM via Sales Person tree
+    # ---------- UPDATED ASM & RSM LOGIC (REAL PERSON NAME) ---------- #
     for cust, row in cust_map.items():
+
         current = sales_map.get(cust)
-        asm, rsm = None, None
+        asm = None
+        rsm = None
 
         while current:
+
             parent = frappe.db.get_value("Sales Person", current, "parent_sales_person")
 
             if not parent:
                 break
 
+            # If parent is ASM group → fetch actual name
             if parent.startswith("ASM"):
-                asm = parent
+                asm = frappe.db.get_value(
+                    "Sales Person",
+                    {"parent_sales_person": parent, "is_group": 0},
+                    "name"
+                )
+
+            # If parent is RSM group → fetch actual name
             if parent.startswith("RSM"):
-                rsm = parent
+                rsm = frappe.db.get_value(
+                    "Sales Person",
+                    {"parent_sales_person": parent, "is_group": 0},
+                    "name"
+                )
 
             current = parent
 
         row["asm"] = asm
         row["rsm"] = rsm
 
-    # 6️⃣ Final Output for Report
+    # Prepare final rows
     result = []
 
     for cust, row in cust_map.items():
@@ -171,7 +185,7 @@ def get_data(filters=None):
             "invoice_count": len(row["invoices_detail"]),
             "total_outstanding": row["total_outstanding"],
             "total_overdue": row["total_overdue"],
-            "invoices": frappe.as_json(row["invoices_detail"])  # for JS popup
+            "invoices": frappe.as_json(row["invoices_detail"])
         })
 
     return result
