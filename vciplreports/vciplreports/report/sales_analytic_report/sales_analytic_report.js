@@ -1,139 +1,108 @@
-// Copyright...
-
 frappe.query_reports["Sales Analytic Report"] = {
-    filters: [
-        {
-            fieldname: "tree_type",
-            label: __("Tree Type"),
-            fieldtype: "Select",
-            options: [
-                "Customer Group",
-                "Customer",
-                "Item Group",
-                "Item",
-                "Territory",
-                "Order Type",
-                "Project",
-				
-            ],
-            default: "Customer",
-            reqd: 1,
-        },
-        {
-            fieldname: "doc_type",
-            label: __("based_on"),
-            fieldtype: "Select",
-            options: ["Sales Order", "Delivery Note", "Sales Invoice"],
-            default: "Sales Invoice",
-            reqd: 1,
-        },
-        {
-            fieldname: "value_quantity",
-            label: __("Value Or Qty"),
-            fieldtype: "Select",
-            options: [
-                { value: "Value", label: __("Value") },
-                { value: "Quantity", label: __("Quantity") },
-            ],
-            default: "Value",
-            reqd: 1,
-        },
-        {
-            fieldname: "from_date",
-            label: __("From Date"),
-            fieldtype: "Date",
-            default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
-            reqd: 1,
-        },
-        {
-            fieldname: "to_date",
-            label: __("To Date"),
-            fieldtype: "Date",
-            default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
-            reqd: 1,
-        },
-        {
-            fieldname: "company",
-            label: __("Company"),
-            fieldtype: "Link",
-            options: "Company",
-            default: frappe.defaults.get_user_default("Company"),
-            reqd: 1,
-        },
-        {
-            fieldname: "range",
-            label: __("Range"),
-            fieldtype: "Select",
-            options: [
-                { value: "Weekly", label: __("Weekly") },
-                { value: "Monthly", label: __("Monthly") },
-                { value: "Quarterly", label: __("Quarterly") },
-                { value: "Yearly", label: __("Yearly") },
-            ],
-            default: "Monthly",
-            reqd: 1,
-        },
-        {
-            fieldname: "show_aggregate_value_from_subsidiary_companies",
-            label: __("Show Aggregate Value from Subsidiary Companies"),
-            fieldtype: "Check",
-        },
-    ],
-
-    get_datatable_options(options) {
-        return Object.assign(options, {
-            checkboxColumn: true,
-            events: {
-                onCheckRow: function (data) {
-                    if (!data) return;
-
-                    const data_doctype = $(data[2].html)[0]
-                        .attributes.getNamedItem("data-doctype").value;
-                    const tree_type =
-                        frappe.query_report.filters[0].value;
-
-                    if (data_doctype != tree_type) return;
-
-                    const row_name = data[2].content;
-                    const raw_data = frappe.query_report.chart.data;
-
-                    const new_datasets = raw_data.datasets;
-                    const element_found = new_datasets.some(
-                        (element, index, array) => {
-                            if (element.name == row_name) {
-                                array.splice(index, 1);
-                                return true;
-                            }
-                            return false;
-                        }
-                    );
-
-                    const slice_at =
-                        { Customer: 4, Item: 5 }[tree_type] || 3;
-
-                    if (!element_found) {
-                        new_datasets.push({
-                            name: row_name,
-                            values: data
-                                .slice(slice_at, data.length - 1)
-                                .map((c) => c.content),
-                        });
-                    }
-
-                    const new_data = {
-                        labels: raw_data.labels,
-                        datasets: new_datasets,
-                    };
-
-                    const new_options = Object.assign(
-                        {},
-                        frappe.query_report.chart_options,
-                        { data: new_data }
-                    );
-                    frappe.query_report.render_chart(new_options);
-                    frappe.query_report.raw_chart_data = new_data;
-                },
-            },
-        });
+    onload: function (report) {
+        // Enable tree structure visually
+        report.tree_report = true;
     },
+
+    formatter: function (value, row, column, data, default_formatter) {
+        value = default_formatter(value, row, column, data);
+
+        if (!data) return value;
+
+        let indent = data.indent || 0;
+        let space = "";
+
+        // Add indentation
+        for (let i = 0; i < indent; i++) {
+            space += `<span style="padding-left: 20px;"></span>`;
+        }
+
+        // Add expand/collapse arrow only for groups & customers
+        if (column.fieldname === "entity") {
+            if (indent < 2) {
+                // Clickable toggle arrow
+                let icon = data._expanded ? "▼" : "▶";
+
+                value = `
+                    <span class="tree-toggle" 
+                        data-name="${data.entity}"
+                        data-indent="${indent}"
+                        style="cursor:pointer; font-weight:bold;">
+                        ${icon}
+                    </span> ${space} ${value}
+                `;
+            } else {
+                // Invoice level – bullet icon only
+                value = `${space} ${value}`;
+            }
+        }
+
+        return value;
+    },
+
+    after_datatable_render: function (report) {
+        const dt = report.datatable;
+        if (!dt) return;
+
+        // Add toggle click listeners
+        $(report.page.wrapper)
+            .find(".tree-toggle")
+            .off("click")
+            .on("click", function () {
+                let entity = $(this).data("name");
+                let indent = $(this).data("indent");
+
+                toggle_rows(report, entity, indent);
+            });
+    }
 };
+
+
+// -------------------------------------------------------------
+// DRILL-DOWN LOGIC
+// -------------------------------------------------------------
+function toggle_rows(report, entity, indent) {
+    let rows = report.data;
+    let updated = [];
+
+    let expand_mode = true;
+
+    // Determine current mode (expand or collapse)
+    for (let r of rows) {
+        if (r.entity === entity && r._expanded) {
+            expand_mode = false;
+            break;
+        }
+    }
+
+    for (let r of rows) {
+
+        // If this is the clicked row, toggle its _expanded flag
+        if (r.entity === entity) {
+            r._expanded = expand_mode;
+            updated.push(r);
+            continue;
+        }
+
+        // If collapsing → hide all children
+        if (!expand_mode) {
+            if (r.parent_node === entity || r.indent > indent) {
+                r._hidden = true;
+            }
+        }
+
+        // If expanding → show only immediate children
+        if (expand_mode) {
+            if (r.parent_node === entity) {
+                r._hidden = false;
+
+                // collapse their children initially
+                r._expanded = false;
+            }
+        }
+
+        updated.push(r);
+    }
+
+    report.datatable.refresh(updated);
+}

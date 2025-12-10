@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import today, getdate
+from frappe.utils import today, getdate, date_diff
 
 
 def execute(filters=None):
@@ -54,6 +54,13 @@ def get_columns():
             "fieldname": "total_overdue",
             "fieldtype": "Currency",
             "width": 150
+        },
+        {
+            "label": "Average Overdue Days",
+            "fieldname": "avg_overdue_days",
+            "fieldtype": "Float",
+            "precision": 2,
+            "width": 180
         },
         {
             "label": "Invoices",
@@ -115,9 +122,18 @@ def get_data(filters=None):
 
         # overdue calculation
         overdue_amount = 0
+        overdue_days_list = []
+
         for t in pay_map.get(inv.invoice, []):
             if t.due_date and getdate(today()) > getdate(t.due_date):
                 overdue_amount += t.payment_amount
+                overdue_days_list.append(date_diff(today(), t.due_date))
+
+        # average overdue days for this invoice
+        avg_overdue_days = (
+            sum(overdue_days_list) / len(overdue_days_list)
+            if overdue_days_list else 0
+        )
 
         cust_map[cust]["total_overdue"] += overdue_amount
 
@@ -126,7 +142,8 @@ def get_data(filters=None):
             "invoice": inv.invoice,
             "posting_date": str(inv.posting_date),
             "outstanding": float(inv.outstanding_amount),
-            "overdue": float(overdue_amount)
+            "overdue": float(overdue_amount),
+            "avg_overdue_days": avg_overdue_days
         })
 
     # Load Sales Team relation
@@ -177,6 +194,11 @@ def get_data(filters=None):
     result = []
 
     for cust, row in cust_map.items():
+
+        # Customer-level average overdue days
+        invoice_days = [i["avg_overdue_days"] for i in row["invoices_detail"]]
+        avg_days_customer = sum(invoice_days) / len(invoice_days) if invoice_days else 0
+
         result.append({
             "customer_group": row["customer_group"],
             "customer": cust,
@@ -185,6 +207,7 @@ def get_data(filters=None):
             "invoice_count": len(row["invoices_detail"]),
             "total_outstanding": row["total_outstanding"],
             "total_overdue": row["total_overdue"],
+            "avg_overdue_days": avg_days_customer,
             "invoices": frappe.as_json(row["invoices_detail"])
         })
 
