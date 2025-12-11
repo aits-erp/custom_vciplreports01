@@ -1,0 +1,136 @@
+<style>
+    .dashboard-container {
+        margin: 25px;
+    }
+
+    .section-title {
+        font-size: 22px;
+        font-weight: 700;
+        margin: 30px 0 10px;
+        color: #34495e;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 25px;
+        margin-top: 10px;
+    }
+
+    .dashboard-card {
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 25px;
+        text-align: center;
+        cursor: pointer;
+        border: 1px solid rgba(255,255,255,0.3);
+        transition: 0.25s ease-in-out;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.10);
+    }
+
+    .dashboard-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+    }
+
+    .dashboard-card i {
+        font-size: 48px;
+        margin-bottom: 12px;
+    }
+
+    .dashboard-title {
+        font-weight: 600;
+        font-size: 17px;
+        margin-top: 4px;
+        color: #2d3436;
+    }
+
+    /* Gradient Themes */
+    .blue-card { background: linear-gradient(135deg, #4e73df, #1cc88a); color: white; }
+    .orange-card { background: linear-gradient(135deg, #ff9966, #ff5e62); color: white; }
+    .purple-card { background: linear-gradient(135deg, #6a11cb, #2575fc); color: white; }
+    .green-card { background: linear-gradient(135deg, #11998e, #38ef7d); color: white; }
+    .red-card { background: linear-gradient(135deg, #ff416c, #ff4b2b); color: white; }
+
+</style>
+
+<div class="dashboard-container">
+
+    <!-- SALES REPORT SECTION -->
+    <div class="section-title">📊 Sales Reports</div>
+    <div class="dashboard-grid">
+
+        <div class="dashboard-card purple-card report-card" data-report="Distributor Report">
+            <i class="fa fa-users"></i>
+            <div class="dashboard-title">Distributor Report</div>
+        </div>
+
+        <div class="dashboard-card green-card report-card" data-report="Top selling below MSL report">
+            <i class="fa fa-line-chart"></i>
+            <div class="dashboard-title">Top Selling Below MSL</div>
+        </div>
+
+        <!-- Top 100 Most Selling Item -->
+        <div class="dashboard-card green-card report-card" data-report="Top 100 Most selling Item">
+      <i class="fa fa-sort-amount-desc"></i>
+    <div class="dashboard-title">Top 100 Most Selling</div>
+    </div>
+
+<!-- Bottom 100 Most Selling Item -->
+    <div class="dashboard-card red-card report-card" data-report="Bottom 100 Most selling Item">
+    <i class="fa fa-sort-amount-asc"></i>
+    <div class="dashboard-title">Bottom 100 Most Selling</div>
+    </div>
+
+    <!-- Outstanding Debtors Monthwise -->
+    <div class="dashboard-card purple-card report-card" data-report="Outstanding Debtors Monthwise">
+    <i class="fa fa-credit-card"></i>
+    <div class="dashboard-title">Outstanding Debtors Monthwise</div>
+    </div>
+
+        <div class="dashboard-card blue-card report-card" data-report="Monthwise Sales">
+            <i class="fa fa-bar-chart"></i>
+            <div class="dashboard-title">Monthwise Sales</div>
+        </div>
+
+        <div class="dashboard-card orange-card report-card" data-report="Category wise Sales">
+            <i class="fa fa-pie-chart"></i>
+            <div class="dashboard-title">Category Wise Sales</div>
+        </div>
+
+        <div class="dashboard-card green-card report-card" data-report="Top selling below MSL report">
+            <i class="fa fa-line-chart"></i>
+            <div class="dashboard-title">Top Selling Below MSL</div>
+        </div>
+
+        <div class="dashboard-card blue-card report-card" data-report="Monthwise Sales">
+            <i class="fa fa-bar-chart"></i>
+            <div class="dashboard-title">Monthwise Sales</div>
+        </div>
+
+        <div class="dashboard-card red-card report-card" data-report="Sales Analytic Report">
+            <i class="fa fa-area-chart"></i>
+            <div class="dashboard-title">Sales Analytic</div>
+        </div>
+
+    </div>
+
+
+    <!-- MORE REPORTS CAN BE ADDED HERE -->
+    <div class="section-title">📦 Inventory Reports</div>
+    <div class="dashboard-grid">
+
+        <div class="dashboard-card blue-card report-card" data-report="Stock Ledger">
+            <i class="fa fa-archive"></i>
+            <div class="dashboard-title">Stock Ledger</div>
+        </div>
+
+        <div class="dashboard-card orange-card report-card" data-report="Stock Summary">
+            <i class="fa fa-cubes"></i>
+            <div class="dashboard-title">Stock Summary</div>
+        </div>
+
+    </div>
+
+</div>
