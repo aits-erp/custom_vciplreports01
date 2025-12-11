@@ -1,9 +1,33 @@
 import frappe
+from datetime import date
+
 
 def execute(filters=None):
     filters = filters or {}
 
-    columns = [
+    # ---- FINANCIAL YEAR RANGE LOGIC ----
+    year = int(filters.get("year")) if filters.get("year") else None
+
+    if year:
+        # Example: 2024 → range 01-04-2024 to 31-03-2025
+        from_date = date(year, 4, 1)
+        to_date = date(year + 1, 3, 31)
+    else:
+        # default: auto-detect FY based on today
+        today = date.today()
+        fy_year = today.year if today.month > 3 else today.year - 1
+        from_date = date(fy_year, 4, 1)
+        to_date = date(fy_year + 1, 3, 31)
+
+    filters["from_date"] = from_date
+    filters["to_date"] = to_date
+
+    return get_columns(), get_data(filters)
+
+
+# -------------------- COLUMNS -------------------- #
+def get_columns():
+    return [
         {"label": "Item Code", "fieldname": "item_code", "fieldtype": "Link",
          "options": "Item", "width": 150},
 
@@ -18,42 +42,44 @@ def execute(filters=None):
 
         {"label": "Total Stock Qty", "fieldname": "total_stock_qty", "fieldtype": "Float", "width": 140},
 
-        {"label": "Minimum Stock Level", "fieldname": "min_stock_level", "fieldtype": "Float", "width": 140},
+        {"label": "Minimum Stock Level (Safety Stock)", "fieldname": "min_stock_level", "fieldtype": "Float", "width": 160},
 
         {"label": "Shortage Qty", "fieldname": "shortage_qty", "fieldtype": "Float", "width": 120},
 
-        # drill down link
         {"label": "Warehouses", "fieldname": "details", "fieldtype": "Data", "width": 120},
     ]
 
-    data = get_data(filters)
-    return columns, data
 
-
+# -------------------- FETCH DATA -------------------- #
 def get_data(filters):
 
-    params = {"docstatus": 1}
-    conditions = " AND si.docstatus = %(docstatus)s"
+    params = {
+        "docstatus": 1,
+        "from_date": filters["from_date"],
+        "to_date": filters["to_date"],
+    }
 
     # --------------------------------------
-    # SALES QUERY
+    # SALES QUERY WITH SAFETY STOCK
     # --------------------------------------
-    sales_query = f"""
+    sales_query = """
         SELECT
             sii.item_code,
             i.item_name,
             i.item_group,
             SUM(sii.amount) AS total_amount,
             SUM(sii.qty) AS total_qty,
-            COALESCE(i.min_order_qty, 0) AS min_stock_level
+            COALESCE(i.safety_stock, 0) AS min_stock_level
         FROM `tabSales Invoice Item` sii
         JOIN `tabSales Invoice` si ON si.name = sii.parent
         JOIN `tabItem` i ON i.name = sii.item_code
         WHERE 1 = 1
-        {conditions}
-        GROUP BY sii.item_code, i.item_name, i.item_group, i.min_order_qty
+            AND si.docstatus = %(docstatus)s
+            AND si.posting_date >= %(from_date)s
+            AND si.posting_date <= %(to_date)s
+        GROUP BY sii.item_code, i.item_name, i.item_group, i.safety_stock
         ORDER BY total_amount DESC
-        LIMIT 100
+        LIMIT 200
     """
 
     rows = frappe.db.sql(sales_query, params, as_dict=True)
@@ -82,23 +108,28 @@ def get_data(filters):
         warehouse_map.setdefault(b.item_code, {})
         warehouse_map[b.item_code][b.warehouse] = b.actual_qty
 
-    # Always include WIP warehouse with qty = 0 if not present
+    # ensure WIP warehouse exists even if qty = 0
     for item in item_codes:
         warehouse_map.setdefault(item, {})
         warehouse_map[item].setdefault(WIP_WAREHOUSE, 0)
 
     # --------------------------------------
-    # FINAL DATA MERGE
+    # FINAL MERGE
     # --------------------------------------
     for r in rows:
         item_code = r.item_code
 
+        # total stock qty
         r["total_stock_qty"] = total_stock.get(item_code, 0)
 
-        min_level = r.get("min_stock_level") or 0
-        shortage = min_level - r["total_stock_qty"]
+        # MSL = safety_stock
+        msl = r.get("min_stock_level") or 0
+
+        # shortage qty
+        shortage = msl - r["total_stock_qty"]
         r["shortage_qty"] = shortage if shortage > 0 else 0
 
+        # drill down
         r["details"] = "View Warehouses"
 
     return rows
