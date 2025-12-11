@@ -47,7 +47,7 @@ def get_data(filters):
     return frappe.db.sql(sql, values, as_dict=True)
 
 
-# ============ MONTH-WISE BREAKUP POPUP ============ #
+# ---------------- MONTH-WISE POPUP BREAKDOWN ---------------- #
 
 @frappe.whitelist()
 def get_month_breakup(customer, company=None, year=None):
